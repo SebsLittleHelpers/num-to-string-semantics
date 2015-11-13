@@ -103,40 +103,41 @@ object JSNumber {
       // Semantics are different only when ulp > 1 (exp > 53)
       // And js doesn't use scientific notation (n <= 21)
       if(exp >= 53 && n <= 21){
-        val shorterS = (0 to (k - 13)) flatMap { i => 
-          val part = s.toString.take(k - i)
-          val one = part + ("0" * i)
-          if(part.last < '9') {
-            val two = part.init + (part.last + 1).toChar + ("0" * i)
-            Seq(one, two)
-          } else {
-            Seq(one)
-          }
-        } map { BigInt(_) }
+       
+        @inline def toOriginalValue(s: BigInt): BigInt = 
+          s * BigInt(10).pow(n - s.toString.length)
+
+        @inline def dropTrailingZeros(s: BigInt): BigInt = 
+          BigInt(s.toString.reverse.dropWhile(_ == '0').reverse)
+
+        val shorterS = (0 to (k - 12)).flatMap( i => 
+          Seq(
+            BigDecimal(s).setScale(-i, BigDecimal.RoundingMode.UP).toBigInt,  
+            BigDecimal(s).setScale(-i, BigDecimal.RoundingMode.DOWN).toBigInt
+          )
+        ).filter(
+          s => toOriginalValue(s).toDouble == value  
+        ).map(
+          s => dropTrailingZeros(s)
+        ).distinct
         
-        val possibleS = shorterS filter { s =>
-          (s * BigInt(10).pow(n-k)).toDouble == value
-        } map {
-          s => BigInt(s.toString.reverse.dropWhile(_ == '0').reverse)
-        }
+        val newK = shorterS.map(_.toString.length).min
 
-        val realK = possibleS.map(_.toString.length).min
-
-        val realS = possibleS.filter(_.toString.length == realK).distinct
+        val shortestS = shorterS.filter(_.toString.length == newK)
         
         val mantissa = (bits & 0x000fffffffffffffL) + (1L << 52) 
-        val exactM = BigInt(mantissa) << (exp - 52)
+        val exactValue = BigInt(mantissa) << (exp - 52)
 
-        val distance = realS.map( s => (s * BigInt(10).pow(n-s.toString.length))
-        - exactM).map(_.abs).min
+        @inline def distance(s: BigInt): BigInt =
+          (toOriginalValue(s) - exactValue).abs
 
-        val closestS = realS.filter { s =>
-          ((s * BigInt(10).pow(n-s.toString.length)) - exactM).abs == distance
-        }
+        val minDistance = shortestS.map(s => distance(s)).min
 
-        val finalS = if(closestS.length == 1) closestS.head else closestS.filter(_ % 2 == 0).head
+        val closestS = shortestS.filter(s => distance(s) == minDistance)
 
-        (n, realK, finalS)
+        val newS = if(closestS.length == 1) closestS.head else closestS.filter(_ % 2 == 0).head
+
+        (n, newK, newS)
       } else {
         (n, k, s)
       }
